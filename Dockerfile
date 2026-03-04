@@ -8,6 +8,9 @@ RUN apt-get update && apt-get install -y \
 # Włączenie modułu mod_rewrite
 RUN a2enmod rewrite
 
+# Wyciszenie ostrzeżenia ServerName
+RUN echo "ServerName localhost" >> /etc/apache2/apache2.conf
+
 # Ustawienie katalogu roboczego
 WORKDIR /var/www/html
 
