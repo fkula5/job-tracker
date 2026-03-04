@@ -11,9 +11,27 @@ if ($current_user_id) {
     $stmt = $pdo->prepare("SELECT a.*, u.name as user_name FROM applications a LEFT JOIN users u ON a.user_id = u.id WHERE a.user_id = ? ORDER BY a.applied_at DESC, a.id DESC");
     $stmt->execute([$current_user_id]);
     $apps = $stmt->fetchAll();
+
+    $total_apps = count($apps);
+    $stats_counts = array_fill_keys(array_keys($statuses), 0);
+    foreach ($apps as $app) {
+        if (isset($stats_counts[$app['status']])) {
+            $stats_counts[$app['status']]++;
+        }
+    }
 } else {
     $apps = $pdo->query("SELECT a.*, u.name as user_name FROM applications a LEFT JOIN users u ON a.user_id = u.id ORDER BY a.applied_at DESC, a.id DESC")->fetchAll();
+    
+    $total_apps = count($apps);
+    $stats_counts = array_fill_keys(array_keys($statuses), 0);
+    foreach ($apps as $app) {
+        if (isset($stats_counts[$app['status']])) {
+            $stats_counts[$app['status']]++;
+        }
+    }
 }
+
+$offer_rate = $total_apps > 0 ? round(($stats_counts['Oferta'] / $total_apps) * 100, 1) : 0;
 ?>
 <!DOCTYPE html>
 <html lang="pl" data-bs-theme="dark">
@@ -29,6 +47,8 @@ if ($current_user_id) {
         .status-badge { cursor: pointer; transition: opacity 0.2s; }
         .status-badge:hover { opacity: 0.8; }
         .table-hover tbody tr:hover { background-color: rgba(255,255,255,0.05); }
+        .stats-card { transition: transform 0.2s; }
+        .stats-card:hover { transform: translateY(-5px); }
     </style>
 </head>
 <body class="py-4">
@@ -62,6 +82,76 @@ if ($current_user_id) {
             </form>
         </div>
     </div>
+
+    <!-- Statystyki -->
+    <div class="row mb-4 g-3">
+        <div class="col-6 col-md-4 col-lg-2">
+            <div class="card bg-dark text-light stats-card h-100 border-start border-4 border-secondary">
+                <div class="card-body p-3">
+                    <h6 class="card-subtitle mb-1 text-muted small uppercase">Wszystkie</h6>
+                    <h2 class="card-title mb-0"><?= $total_apps ?></h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-md-4 col-lg-2">
+            <div class="card bg-dark text-light stats-card h-100 border-start border-4 border-info">
+                <div class="card-body p-3">
+                    <h6 class="card-subtitle mb-1 text-muted small uppercase">Wysłano</h6>
+                    <h2 class="card-title mb-0"><?= $stats_counts['Wysłano'] ?></h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-md-4 col-lg-3">
+            <div class="card bg-dark text-light stats-card h-100 border-start border-4 border-primary">
+                <div class="card-body p-3">
+                    <h6 class="card-subtitle mb-1 text-muted small uppercase">Rozmowy</h6>
+                    <div class="d-flex align-items-baseline gap-2">
+                        <h2 class="card-title mb-0"><?= $stats_counts['Rozmowa'] ?></h2>
+                        <?php 
+                            $conv_rate = $total_apps > 0 ? round((($stats_counts['Rozmowa'] + $stats_counts['Oferta']) / $total_apps) * 100, 1) : 0;
+                        ?>
+                        <span class="text-primary small fw-bold" title="Współczynnik odpowiedzi">(<?= $conv_rate ?>%)</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-md-6 col-lg-3">
+            <div class="card bg-dark text-light stats-card h-100 border-start border-4 border-success">
+                <div class="card-body p-3">
+                    <h6 class="card-subtitle mb-1 text-muted small uppercase">Oferty</h6>
+                    <div class="d-flex align-items-baseline gap-2">
+                        <h2 class="card-title mb-0"><?= $stats_counts['Oferta'] ?></h2>
+                        <span class="text-success small fw-bold" title="Success Rate">(<?= $offer_rate ?>%)</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-md-6 col-lg-2">
+            <div class="card bg-dark text-light stats-card h-100 border-start border-4 border-danger">
+                <div class="card-body p-3">
+                    <h6 class="card-subtitle mb-1 text-muted small uppercase">Odrzucone</h6>
+                    <h2 class="card-title mb-0"><?= $stats_counts['Odrzucona'] ?></h2>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <?php if ($total_apps > 0): ?>
+    <div class="progress mb-4" style="height: 10px; border-radius: 5px;">
+        <?php 
+        foreach ($statuses as $status => $color_name): 
+            $percent = ($stats_counts[$status] / $total_apps) * 100;
+            if ($percent > 0):
+        ?>
+            <div class="progress-bar bg-<?= $color_name ?>" role="progressbar" 
+                 style="width: <?= $percent ?>%" 
+                 title="<?= $status ?>: <?= $stats_counts[$status] ?> (<?= round($percent, 1) ?>%)"></div>
+        <?php 
+            endif;
+        endforeach; 
+        ?>
+    </div>
+    <?php endif; ?>
 
     <div class="card bg-dark text-light">
         <div class="card-body p-0">
