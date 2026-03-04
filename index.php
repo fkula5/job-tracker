@@ -1,33 +1,20 @@
 <?php
-require_once 'db.php';
+require_once 'auth.php';
+redirect_if_not_logged_in();
 
-$current_user_id = $_GET['user_id'] ?? null;
+$current_user_id = get_logged_in_user_id();
+$username = $_SESSION['username'] ?? 'Użytkownik';
 
-// Pobieranie użytkowników
-$users = $pdo->query("SELECT * FROM users ORDER BY name ASC")->fetchAll();
+// Pobieranie listy aplikacji (tylko dla zalogowanego użytkownika)
+$stmt = $pdo->prepare("SELECT a.*, u.name as user_name FROM applications a LEFT JOIN users u ON a.user_id = u.id WHERE a.user_id = ? ORDER BY a.applied_at DESC, a.id DESC");
+$stmt->execute([$current_user_id]);
+$apps = $stmt->fetchAll();
 
-// Pobieranie listy aplikacji (filtrowanie po użytkowniku)
-if ($current_user_id) {
-    $stmt = $pdo->prepare("SELECT a.*, u.name as user_name FROM applications a LEFT JOIN users u ON a.user_id = u.id WHERE a.user_id = ? ORDER BY a.applied_at DESC, a.id DESC");
-    $stmt->execute([$current_user_id]);
-    $apps = $stmt->fetchAll();
-
-    $total_apps = count($apps);
-    $stats_counts = array_fill_keys(array_keys($statuses), 0);
-    foreach ($apps as $app) {
-        if (isset($stats_counts[$app['status']])) {
-            $stats_counts[$app['status']]++;
-        }
-    }
-} else {
-    $apps = $pdo->query("SELECT a.*, u.name as user_name FROM applications a LEFT JOIN users u ON a.user_id = u.id ORDER BY a.applied_at DESC, a.id DESC")->fetchAll();
-    
-    $total_apps = count($apps);
-    $stats_counts = array_fill_keys(array_keys($statuses), 0);
-    foreach ($apps as $app) {
-        if (isset($stats_counts[$app['status']])) {
-            $stats_counts[$app['status']]++;
-        }
+$total_apps = count($apps);
+$stats_counts = array_fill_keys(array_keys($statuses), 0);
+foreach ($apps as $app) {
+    if (isset($stats_counts[$app['status']])) {
+        $stats_counts[$app['status']]++;
     }
 }
 
@@ -55,33 +42,21 @@ $offer_rate = $total_apps > 0 ? round(($stats_counts['Oferta'] / $total_apps) * 
 
 <div class="container">
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h1 class="h3 mb-0"><i class="bi bi-briefcase-fill me-2 text-primary"></i>Job Tracker</h1>
+        <div>
+            <h1 class="h3 mb-0"><i class="bi bi-briefcase-fill me-2 text-primary"></i>Job Tracker</h1>
+            <p class="text-muted small mb-0">Zalogowany jako: <strong><?= htmlspecialchars($username) ?></strong></p>
+        </div>
         
         <div class="d-flex gap-2">
-            <button class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#addUserModal">
-                <i class="bi bi-person-plus-fill"></i> Nowy użytkownik
-            </button>
+            <a href="logout.php" class="btn btn-outline-danger btn-sm">
+                <i class="bi bi-box-arrow-right"></i> Wyloguj
+            </a>
             <button class="btn btn-primary" onclick="openAddModal()">
                 <i class="bi bi-plus-lg me-1"></i> Dodaj ofertę
             </button>
         </div>
     </div>
 
-    <div class="row mb-4">
-        <div class="col-md-4">
-            <form method="GET" class="input-group input-group-sm">
-                <label class="input-group-text bg-dark text-light border-secondary">Użytkownik</label>
-                <select name="user_id" class="form-select bg-dark text-light border-secondary" onchange="this.form.submit()">
-                    <option value="">Wszyscy</option>
-                    <?php foreach ($users as $u): ?>
-                        <option value="<?= $u['id'] ?>" <?= $current_user_id == $u['id'] ? 'selected' : '' ?>>
-                            <?= htmlspecialchars($u['name']) ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-            </form>
-        </div>
-    </div>
 
     <!-- Statystyki -->
     <div class="row mb-4 g-3">
@@ -226,29 +201,6 @@ $offer_rate = $total_apps > 0 ? round(($stats_counts['Oferta'] / $total_apps) * 
     </div>
 </div>
 
-<!-- Modal Nowy Użytkownik -->
-<div class="modal fade" id="addUserModal" tabindex="-1">
-    <div class="modal-dialog modal-sm">
-        <form action="actions.php" method="POST" class="modal-content bg-dark text-light">
-            <div class="modal-header border-secondary text-light">
-                <h5 class="modal-title">Dodaj użytkownika</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <input type="hidden" name="action" value="add_user">
-                <input type="hidden" name="current_user_id" value="<?= $current_user_id ?>">
-                <div class="mb-3">
-                    <label class="form-label small">Nazwa / Imię</label>
-                    <input type="text" name="name" class="form-control form-control-sm bg-secondary text-white border-0" required>
-                </div>
-            </div>
-            <div class="modal-footer border-secondary">
-                <button type="submit" class="btn btn-sm btn-primary px-4 w-100">Zapisz</button>
-            </div>
-        </form>
-    </div>
-</div>
-
 <!-- Modal Dodawania / Edycji -->
 <div class="modal fade" id="appModal" tabindex="-1">
     <div class="modal-dialog">
@@ -260,19 +212,8 @@ $offer_rate = $total_apps > 0 ? round(($stats_counts['Oferta'] / $total_apps) * 
             <div class="modal-body">
                 <input type="hidden" name="action" id="modalAction" value="add">
                 <input type="hidden" name="id" id="modalId">
-                <input type="hidden" name="current_user_id" value="<?= $current_user_id ?>">
+                <input type="hidden" name="user_id" value="<?= $current_user_id ?>">
                 
-                <div class="mb-3">
-                    <label class="form-label small">Użytkownik</label>
-                    <select name="user_id" id="modalUserId" class="form-select form-select-sm bg-secondary text-white border-0">
-                        <option value="">Wybierz użytkownika...</option>
-                        <?php foreach ($users as $u): ?>
-                            <option value="<?= $u['id'] ?>" <?= $current_user_id == $u['id'] ? 'selected' : '' ?>>
-                                <?= htmlspecialchars($u['name']) ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
                 <div class="mb-3">
                     <label class="form-label small">Firma *</label>
                     <input type="text" name="company" id="modalCompany" class="form-control form-control-sm bg-secondary text-white border-0" required placeholder="np. Google">
@@ -339,7 +280,6 @@ $offer_rate = $total_apps > 0 ? round(($stats_counts['Oferta'] / $total_apps) * 
         document.getElementById('modalTitle').innerText = 'Edytuj aplikację';
         document.getElementById('modalAction').value = 'edit';
         document.getElementById('modalId').value = app.id;
-        document.getElementById('modalUserId').value = app.user_id || '';
         document.getElementById('modalCompany').value = app.company;
         document.getElementById('modalPosition').value = app.position;
         document.getElementById('modalLink').value = app.link || '';

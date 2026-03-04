@@ -14,13 +14,22 @@ try {
     // Users table
     $pdo->exec("CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL UNIQUE
+        name TEXT NOT NULL UNIQUE,
+        password TEXT NOT NULL
     )");
+
+    // Migration: Add password column if it doesn't exist
+    $cols = $pdo->query("PRAGMA table_info(users)")->fetchAll(PDO::FETCH_COLUMN, 1);
+    if (!in_array('password', $cols)) {
+        // For existing users, we'll set a placeholder or require password reset.
+        // For simplicity in this demo, let's just add it with an empty string or a default hash.
+        $pdo->exec("ALTER TABLE users ADD COLUMN password TEXT NOT NULL DEFAULT ''");
+    }
 
     // Applications table
     $pdo->exec("CREATE TABLE IF NOT EXISTS applications (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
+        user_id INTEGER NOT NULL,
         company TEXT NOT NULL,
         position TEXT NOT NULL,
         link TEXT,
