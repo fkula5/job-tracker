@@ -1,0 +1,9 @@
+services:
+  job-tracker:
+    build: .
+    container_name: job_tracker_app
+    ports:
+      - "8080:80"
+    volumes:
+      - ./data:/var/www/html/data
+    restart: unless-stopped
