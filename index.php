@@ -1,67 +1,19 @@
 <?php
-// Konfiguracja bazy danych
-$db_dir = __DIR__ . '/data';
-$db_file = $db_dir . '/jobs.db';
+require_once 'db.php';
 
-// Tworzenie folderu na bazę danych, jeśli nie istnieje
-if (!file_exists($db_dir)) {
-    mkdir($db_dir, 0777, true);
+$current_user_id = $_GET['user_id'] ?? null;
+
+// Pobieranie użytkowników
+$users = $pdo->query("SELECT * FROM users ORDER BY name ASC")->fetchAll();
+
+// Pobieranie listy aplikacji (filtrowanie po użytkowniku)
+if ($current_user_id) {
+    $stmt = $pdo->prepare("SELECT a.*, u.name as user_name FROM applications a LEFT JOIN users u ON a.user_id = u.id WHERE a.user_id = ? ORDER BY a.applied_at DESC, a.id DESC");
+    $stmt->execute([$current_user_id]);
+    $apps = $stmt->fetchAll();
+} else {
+    $apps = $pdo->query("SELECT a.*, u.name as user_name FROM applications a LEFT JOIN users u ON a.user_id = u.id ORDER BY a.applied_at DESC, a.id DESC")->fetchAll();
 }
-
-try {
-    $pdo = new PDO("sqlite:$db_file");
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-
-    // Inicjalizacja tabeli
-    $pdo->exec("CREATE TABLE IF NOT EXISTS applications (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        company TEXT NOT NULL,
-        position TEXT NOT NULL,
-        link TEXT,
-        applied_at DATE DEFAULT CURRENT_DATE,
-        notes TEXT,
-        status TEXT DEFAULT 'Wysłano'
-    )");
-} catch (PDOException $e) {
-    die("Błąd bazy danych: " . $e->getMessage());
-}
-
-// Obsługa akcji (POST)
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $action = $_POST['action'] ?? '';
-
-    if ($action === 'add') {
-        $stmt = $pdo->prepare("INSERT INTO applications (company, position, link, applied_at, notes, status) VALUES (?, ?, ?, ?, ?, ?)");
-        $stmt->execute([
-            $_POST['company'] ?? '',
-            $_POST['position'] ?? '',
-            $_POST['link'] ?? '',
-            $_POST['applied_at'] ?: date('Y-m-d'),
-            $_POST['notes'] ?? '',
-            $_POST['status'] ?? 'Wysłano'
-        ]);
-    } elseif ($action === 'update_status') {
-        $stmt = $pdo->prepare("UPDATE applications SET status = ? WHERE id = ?");
-        $stmt->execute([$_POST['status'], $_POST['id']]);
-    } elseif ($action === 'delete') {
-        $stmt = $pdo->prepare("DELETE FROM applications WHERE id = ?");
-        $stmt->execute([$_POST['id']]);
-    }
-    
-    header("Location: index.php");
-    exit;
-}
-
-// Pobieranie listy aplikacji
-$apps = $pdo->query("SELECT * FROM applications ORDER BY applied_at DESC, id DESC")->fetchAll();
-
-$statuses = [
-    'Wysłano' => 'secondary',
-    'Rozmowa' => 'primary',
-    'Odrzucona' => 'danger',
-    'Oferta' => 'success'
-];
 ?>
 <!DOCTYPE html>
 <html lang="pl" data-bs-theme="dark">
@@ -83,10 +35,32 @@ $statuses = [
 
 <div class="container">
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h1 class="h3"><i class="bi bi-briefcase-fill me-2 text-primary"></i>Job Tracker</h1>
-        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addModal">
-            <i class="bi bi-plus-lg me-1"></i> Dodaj ofertę
-        </button>
+        <h1 class="h3 mb-0"><i class="bi bi-briefcase-fill me-2 text-primary"></i>Job Tracker</h1>
+        
+        <div class="d-flex gap-2">
+            <button class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#addUserModal">
+                <i class="bi bi-person-plus-fill"></i> Nowy użytkownik
+            </button>
+            <button class="btn btn-primary" onclick="openAddModal()">
+                <i class="bi bi-plus-lg me-1"></i> Dodaj ofertę
+            </button>
+        </div>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-md-4">
+            <form method="GET" class="input-group input-group-sm">
+                <label class="input-group-text bg-dark text-light border-secondary">Użytkownik</label>
+                <select name="user_id" class="form-select bg-dark text-light border-secondary" onchange="this.form.submit()">
+                    <option value="">Wszyscy</option>
+                    <?php foreach ($users as $u): ?>
+                        <option value="<?= $u['id'] ?>" <?= $current_user_id == $u['id'] ? 'selected' : '' ?>>
+                            <?= htmlspecialchars($u['name']) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </form>
+        </div>
     </div>
 
     <div class="card bg-dark text-light">
@@ -95,6 +69,7 @@ $statuses = [
                 <table class="table table-dark table-hover align-middle mb-0">
                     <thead class="table-secondary">
                         <tr>
+                            <th>Użytkownik</th>
                             <th>Firma</th>
                             <th>Stanowisko</th>
                             <th>Data</th>
@@ -106,6 +81,7 @@ $statuses = [
                     <tbody>
                         <?php foreach ($apps as $app): ?>
                         <tr>
+                            <td class="small text-muted"><?= htmlspecialchars($app['user_name'] ?? 'Brak') ?></td>
                             <td>
                                 <strong><?= htmlspecialchars($app['company']) ?></strong>
                                 <?php if ($app['link']): ?>
@@ -122,10 +98,11 @@ $statuses = [
                                     <ul class="dropdown-menu">
                                         <?php foreach ($statuses as $s => $color): ?>
                                             <li>
-                                                <form method="POST" style="display:inline;">
+                                                <form action="actions.php" method="POST" style="display:inline;">
                                                     <input type="hidden" name="action" value="update_status">
                                                     <input type="hidden" name="id" value="<?= $app['id'] ?>">
                                                     <input type="hidden" name="status" value="<?= $s ?>">
+                                                    <input type="hidden" name="current_user_id" value="<?= $current_user_id ?>">
                                                     <button type="submit" class="dropdown-item small"><?= $s ?></button>
                                                 </form>
                                             </li>
@@ -137,15 +114,20 @@ $statuses = [
                                 <?= htmlspecialchars($app['notes']) ?>
                             </td>
                             <td class="text-end">
-                                <form method="POST" onsubmit="return confirm('Czy na pewno chcesz usunąć?');" style="display:inline;">
+                                <button type="button" class="btn btn-link text-info btn-sm p-0 me-2" 
+                                        onclick="editApp(<?= htmlspecialchars(json_encode($app)) ?>)">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+                                <form action="actions.php" method="POST" onsubmit="return confirm('Czy na pewno chcesz usunąć?');" style="display:inline;">
                                     <input type="hidden" name="action" value="delete">
                                     <input type="hidden" name="id" value="<?= $app['id'] ?>">
+                                    <input type="hidden" name="current_user_id" value="<?= $current_user_id ?>">
                                     <button type="submit" class="btn btn-link text-danger btn-sm p-0"><i class="bi bi-trash"></i></button>
                                 </form>
                             </td>
                         </tr>
                         <?php endforeach; if (empty($apps)): ?>
-                        <tr><td colspan="6" class="text-center py-4 text-muted">Brak wpisów. Kliknij przycisk powyżej, aby dodać pierwszą aplikację.</td></tr>
+                        <tr><td colspan="7" class="text-center py-4 text-muted">Brak wpisów. Kliknij przycisk powyżej, aby dodać pierwszą aplikację.</td></tr>
                         <?php endif; ?>
                     </tbody>
                 </table>
@@ -154,36 +136,73 @@ $statuses = [
     </div>
 </div>
 
-<!-- Modal Dodawania -->
-<div class="modal fade" id="addModal" tabindex="-1">
-    <div class="modal-dialog">
-        <form method="POST" class="modal-content bg-dark text-light">
+<!-- Modal Nowy Użytkownik -->
+<div class="modal fade" id="addUserModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <form action="actions.php" method="POST" class="modal-content bg-dark text-light">
             <div class="modal-header border-secondary text-light">
-                <h5 class="modal-title">Nowa aplikacja</h5>
+                <h5 class="modal-title">Dodaj użytkownika</h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-                <input type="hidden" name="action" value="add">
+                <input type="hidden" name="action" value="add_user">
+                <input type="hidden" name="current_user_id" value="<?= $current_user_id ?>">
+                <div class="mb-3">
+                    <label class="form-label small">Nazwa / Imię</label>
+                    <input type="text" name="name" class="form-control form-control-sm bg-secondary text-white border-0" required>
+                </div>
+            </div>
+            <div class="modal-footer border-secondary">
+                <button type="submit" class="btn btn-sm btn-primary px-4 w-100">Zapisz</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal Dodawania / Edycji -->
+<div class="modal fade" id="appModal" tabindex="-1">
+    <div class="modal-dialog">
+        <form action="actions.php" method="POST" class="modal-content bg-dark text-light">
+            <div class="modal-header border-secondary text-light">
+                <h5 class="modal-title" id="modalTitle">Nowa aplikacja</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" name="action" id="modalAction" value="add">
+                <input type="hidden" name="id" id="modalId">
+                <input type="hidden" name="current_user_id" value="<?= $current_user_id ?>">
+                
+                <div class="mb-3">
+                    <label class="form-label small">Użytkownik</label>
+                    <select name="user_id" id="modalUserId" class="form-select form-select-sm bg-secondary text-white border-0">
+                        <option value="">Wybierz użytkownika...</option>
+                        <?php foreach ($users as $u): ?>
+                            <option value="<?= $u['id'] ?>" <?= $current_user_id == $u['id'] ? 'selected' : '' ?>>
+                                <?= htmlspecialchars($u['name']) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
                 <div class="mb-3">
                     <label class="form-label small">Firma *</label>
-                    <input type="text" name="company" class="form-control form-control-sm bg-secondary text-white border-0" required placeholder="np. Google">
+                    <input type="text" name="company" id="modalCompany" class="form-control form-control-sm bg-secondary text-white border-0" required placeholder="np. Google">
                 </div>
                 <div class="mb-3">
                     <label class="form-label small">Stanowisko *</label>
-                    <input type="text" name="position" class="form-control form-control-sm bg-secondary text-white border-0" required placeholder="np. Senior PHP Developer">
+                    <input type="text" name="position" id="modalPosition" class="form-control form-control-sm bg-secondary text-white border-0" required placeholder="np. Senior PHP Developer">
                 </div>
                 <div class="mb-3">
                     <label class="form-label small">Link do oferty</label>
-                    <input type="url" name="link" class="form-control form-control-sm bg-secondary text-white border-0" placeholder="https://...">
+                    <input type="url" name="link" id="modalLink" class="form-control form-control-sm bg-secondary text-white border-0" placeholder="https://...">
                 </div>
                 <div class="row mb-3">
                     <div class="col">
                         <label class="form-label small">Data aplikacji</label>
-                        <input type="date" name="applied_at" class="form-control form-control-sm bg-secondary text-white border-0" value="<?= date('Y-m-d') ?>">
+                        <input type="date" name="applied_at" id="modalAppliedAt" class="form-control form-control-sm bg-secondary text-white border-0" value="<?= date('Y-m-d') ?>">
                     </div>
                     <div class="col">
                         <label class="form-label small">Status</label>
-                        <select name="status" class="form-select form-select-sm bg-secondary text-white border-0">
+                        <select name="status" id="modalStatus" class="form-select form-select-sm bg-secondary text-white border-0">
                             <?php foreach ($statuses as $s => $c): ?>
                                 <option value="<?= $s ?>"><?= $s ?></option>
                             <?php endforeach; ?>
@@ -192,17 +211,54 @@ $statuses = [
                 </div>
                 <div class="mb-0">
                     <label class="form-label small">Notatki / Widełki</label>
-                    <textarea name="notes" class="form-control form-control-sm bg-secondary text-white border-0" rows="3" placeholder="Dodatkowe informacje..."></textarea>
+                    <textarea name="notes" id="modalNotes" class="form-control form-control-sm bg-secondary text-white border-0" rows="3" placeholder="Dodatkowe informacje..."></textarea>
                 </div>
             </div>
             <div class="modal-footer border-secondary">
                 <button type="button" class="btn btn-sm btn-outline-secondary text-light" data-bs-dismiss="modal">Anuluj</button>
-                <button type="submit" class="btn btn-sm btn-primary px-4">Dodaj aplikację</button>
+                <button type="submit" class="btn btn-sm btn-primary px-4" id="modalSubmit">Dodaj aplikację</button>
             </div>
         </form>
     </div>
 </div>
 
+<!-- Modal do dodawania (repurposing appModal) -->
+<div style="display:none;">
+    <button id="triggerAddModal" data-bs-toggle="modal" data-bs-target="#appModal"></button>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    const appModal = new bootstrap.Modal(document.getElementById('appModal'));
+    
+    function openAddModal() {
+        document.getElementById('modalTitle').innerText = 'Nowa aplikacja';
+        document.getElementById('modalAction').value = 'add';
+        document.getElementById('modalId').value = '';
+        document.getElementById('modalCompany').value = '';
+        document.getElementById('modalPosition').value = '';
+        document.getElementById('modalLink').value = '';
+        document.getElementById('modalAppliedAt').value = '<?= date('Y-m-d') ?>';
+        document.getElementById('modalStatus').value = 'Wysłano';
+        document.getElementById('modalNotes').value = '';
+        document.getElementById('modalSubmit').innerText = 'Dodaj aplikację';
+        appModal.show();
+    }
+
+    function editApp(app) {
+        document.getElementById('modalTitle').innerText = 'Edytuj aplikację';
+        document.getElementById('modalAction').value = 'edit';
+        document.getElementById('modalId').value = app.id;
+        document.getElementById('modalUserId').value = app.user_id || '';
+        document.getElementById('modalCompany').value = app.company;
+        document.getElementById('modalPosition').value = app.position;
+        document.getElementById('modalLink').value = app.link || '';
+        document.getElementById('modalAppliedAt').value = app.applied_at;
+        document.getElementById('modalStatus').value = app.status;
+        document.getElementById('modalNotes').value = app.notes || '';
+        document.getElementById('modalSubmit').innerText = 'Zapisz zmiany';
+        appModal.show();
+    }
+</script>
 </body>
 </html>
